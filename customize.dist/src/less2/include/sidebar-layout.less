@@ -46,6 +46,14 @@
                 .cp-sidebarlayout-category {
                     display: flex;
                     align-items: center;
+                    white-space: nowrap;
+                    svg {
+                        flex: 0 0 auto;
+                    }
+                    .cp-sidebarlayout-category-name {
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
                     .leftside-menu-category_main();
                     box-shadow: @cryptpad_ui_shadow;
                     &:focus-visible {
@@ -121,6 +129,11 @@
                         display: flex;
                         flex-flow: column;
                         align-items: baseline;
+                        input, textarea {
+                            &:focus-visible {
+                                outline: @variables_focus_style;
+                            }
+                        }
                     }
                     .cp-usergrid-container {
                         margin-bottom: 0px !important;
@@ -219,6 +232,9 @@
                             border-right: 0px;
                             border-top-right-radius: 0px;
                             border-bottom-right-radius: 0px;
+                            &:focus-visible {
+                                outline: @variables_focus_style;
+                            }
                         }
                         input:invalid {
                             border-color: red;

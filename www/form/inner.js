@@ -25,6 +25,7 @@ define([
     '/common/diffMarked.js',
     '/common/sframe-common-codemirror.js',
     '/common/text-cursor.js',
+    '/common/visible.js',
     'cm/lib/codemirror',
     '/components/chainpad/chainpad.dist.js',
     'tui-date-picker',
@@ -73,6 +74,7 @@ define([
     DiffMd,
     SFCodeMirror,
     TextCursor,
+    Visible,
     CMeditor,
     ChainPad,
     DatePicker,
@@ -134,7 +136,8 @@ define([
                 type:"number",
                 value: opts.maxLength,
                 min: 100,
-                max: 5000
+                max: 5000,
+                'aria-label': Messages.form_editMaxLength
             });
             maxLength = h('div.cp-form-edit-max-options', [
                 h('span', Messages.form_editMaxLength),
@@ -242,7 +245,8 @@ define([
                 type:"number",
                 value: v.max,
                 min: 1,
-                max: v.values.length
+                max: v.values.length,
+                'aria-label': Messages.form_editMax
             });
             maxOptions = h('div.cp-form-edit-max-options', [
                 h('span', Messages.form_editMax),
@@ -289,7 +293,7 @@ define([
         var $add, $addItem;
         var addMultiple;
         var getOption = function (val, placeholder, isItem, uid) {
-            var input = h('input', {value:val});
+            var input = h('input', {value:val, 'aria-label': val});
             var $input = $(input);
             if (placeholder) {
                 input.placeholder = val;
@@ -330,7 +334,7 @@ define([
                 setCursor();
             }
 
-            var del = h('button.btn.btn-danger-outline', Icons.get('close'));
+            var del = h('button.btn.btn-danger-outline',{ 'aria-label': Messages.poll_remove }, Icons.get('close'));
             var formHandle;
             if (v.type !== 'time') {
                 formHandle = h('span.cp-form-handle', [
@@ -388,6 +392,7 @@ define([
             }
 
             $(input).on('input', function () {
+                $input.attr('aria-label', $(input).val());
                 evOnSave.fire();
             });
 
@@ -1328,7 +1333,8 @@ define([
                         options: qOptions, // Entries displayed in the menu
                         isSelect: true,
                         caretDown: true,
-                        buttonCls: 'btn btn-secondary'
+                        buttonCls: 'btn btn-secondary',
+                        buttonTitle: Messages.form_condition_q
                     };
                     qSelect = UIElements.createDropdown(qConfig);
                     qSelect[0].dropdown = qSelect;
@@ -1360,7 +1366,10 @@ define([
                     $(iSelect).attr('data-drop', 'i').hide();
                     iSelect.onChange.reg(function () { onChange(); });
 
-                    var remove = h('button.btn.btn-danger-alt.cp-condition-remove', [
+                    var remove = h('button.btn.btn-danger-alt.cp-condition-remove',{
+                            'title': Messages.poll_remove,
+                            'aria-label': Messages.poll_remove
+                    }, [
                         Icons.get('close', {'class': 'nomargin'})
                     ]);
                     $(remove).on('click', function () {
@@ -1697,10 +1706,13 @@ define([
                 var tag = h('input', {
                     type: opts.type,
                     step: "any",
-                    placeholder: Messages['form_input_ph_'+opts.type] || ''
+                    'aria-label': Messages['form_input_ph_'+opts.type],
+                    placeholder: Messages['form_input_ph_'+opts.type]
                 });
                 var $tag = $(tag);
                 $tag.on('change keypress keydown', Util.throttle(function () {
+                    let currentVal = $tag.val().trim();
+                    $tag.attr('aria-label', currentVal || Messages['form_input_ph_'+opts.type] || '');
                     evOnChange.fire();
                 }, 500));
                 var cursorGetter;
@@ -1772,6 +1784,7 @@ define([
                         $text.val($text.val().slice(0, opts.maxLength));
                         l = $text.val().length;
                     }
+                    $text.attr('aria-label', $text.val() || Messages.form_input_ph_text);
                     $(charCount).text(Messages._getKey('form_maxLength', [
                         $text.val().length,
                         opts.maxLength
@@ -2104,13 +2117,18 @@ define([
             get: function (opts, a, n, evOnChange) {
                 opts = Util.clone(TYPES.date.defaultOpts);
 
-                var tag = h('input');
+                var tag = h('input', {'aria-label': Messages.form_date_time});
 
                 var picker = Flatpickr(tag, {
                     disableMobile: true,
                     enableTime: true,
                     time_24hr: is24h,
                     dateFormat: dateFormat,
+                    onChange: function(date) {
+                        if (date) {
+                            $(tag).attr('aria-label', date);
+                        }
+                    }
                 });
 
                 var $tag = $(tag);
@@ -2530,7 +2548,7 @@ define([
                     $(div).data('val', data);
                     return div;
                 });
-                var tag = h('div.cp-form-type-sort-container', { 'role': 'listbox' },[
+                var tag = h('div.cp-form-type-sort-container', { 'role': 'listbox', 'aria-label': Messages._getKey('form_sort_hint', [els.length]) },[
                     h('div.cp-form-sort-hint', Messages._getKey('form_sort_hint', [els.length])),
                     els
                 ]);
@@ -2643,6 +2661,7 @@ define([
         poll: {
             defaultOpts: {
                 type: 'text', // Text or Days or Time
+                required: false,
                 values: [1, 2, 3].map(function (i) {
                     return {
                         uid: Util.uid(),
@@ -2659,6 +2678,7 @@ define([
                 var lines = makePollTable(answers, opts, false);
 
                 var disabled = false;
+                var hasInteracted = false;
 
                 var updateAriaLabel = function ($c, val, index) {
                     const optionLabel = $c.closest('.cp-form-type-poll').find(`.cp-form-poll-option[data-index=${index}] span`).text().trim();
@@ -2681,6 +2701,7 @@ define([
 
                     Util.onClickEnter($c, function () {
                         if (disabled) { return; }
+                        hasInteracted = true;
                         val = (val+1)%3;
                         $c.attr('data-value', val);
                         updateAriaLabel($c, val, index);
@@ -2717,10 +2738,24 @@ define([
                 ]);
                 var $tag = $(tag);
 
+                if (APP.isEditor) {
+                    $tag[0].addEventListener('click', function (e) {
+                        const target = e.target;
+                        if (target.closest('.cp-form-required-radio')) {
+                            e.stopPropagation();
+                        }
+                    });
+                }
                 var cursorGetter;
                 var setCursorGetter = function (f) { cursorGetter = f; };
                 return {
                     tag: tag,
+                    isEmpty: function () {
+                        var v = this.getValue();
+                        if (!v || !v.values) { return true; }      
+                        // Poll is considered empty if user hasn't interacted with it
+                        return !hasInteracted;
+                    },
                     getValue: function () {
                         var res = {};
                         $tag.find('.cp-form-poll-choice').each(function (i, el) {
@@ -2733,6 +2768,7 @@ define([
                     },
                     reset: function () {
                         $tag.find('.cp-form-poll-choice').attr('data-value', 0);
+                        hasInteracted = false;
                     },
                     setEditable: function (state) {
                         disabled = !state;
@@ -2747,6 +2783,8 @@ define([
                         this.reset();
                         if (!res || !res.values) { return; }
                         var val = res.values;
+                        // If there are saved values, user has interacted
+                        hasInteracted = Object.keys(val).length > 0;
                         $tag.find('.cp-form-poll-choice').each(function (i, el) {
                             if (!el._setValue) { return; }
                             var $el = $(el);
@@ -3260,6 +3298,8 @@ define([
             h('span.cp-button-name', Messages._getKey('form_results', [l])),
         ]));
         var it = setInterval(function () {
+            let visible = Visible.currently();
+            if (!visible) { return; }
             sframeChan.query("Q_FORM_FETCH_ANSWERS", content.answers, function (err, obj) {
                 var answers = obj && obj.results;
                 var l = getAnswersLength(answers);
@@ -3906,6 +3946,7 @@ define([
 
                 var btn = h('button.btn.btn-secondary', {
                     title: full ? '' : Messages['form_type_'+type],
+                    'aria-label': full ? '' : Messages['form_type_'+type],
                     'data-type': type
                 }, [
                     (TYPES[type] || STATIC_TYPES[type]).icon.cloneNode(),
@@ -3961,7 +4002,8 @@ define([
             var add = h('div', [Icons.get('add')]);
             if (!full) {
                 add = h('button.btn.cp-form-creator-inline-add', {
-                    title: Messages.tag_add
+                    title: Messages.tag_add,
+                    'aria-label': Messages.tag_add
                 }, [
                     Icons.get('add', {class: 'add-open'}),
                     Icons.get('close', {class: 'add-close'}),
@@ -4048,7 +4090,15 @@ define([
 
             var requiredTag;
             if (block.opts && block.opts.required) {
-                requiredTag = h('span.cp-form-required-tag', Messages.form_required_on);
+                var requiredContent = [Messages.form_required_on];
+                if (type === 'poll') {
+                    var infoIcon = Icons.get('help', {
+                        class: 'cp-form-poll-required-info',
+                        title: Messages.form_poll_required_hint
+                    });
+                    requiredContent.push(infoIcon);
+                }
+                requiredTag = h('span.cp-form-required-tag', { 'id': 'cp-required-' + (n-1) }, requiredContent);
             }
 
             var dragHandle;
@@ -4168,6 +4218,7 @@ define([
                     }
                     if (saving && !e) { return; } // Prevent spam Enter
                     block.q = v.trim();
+                    $inputQ.attr('aria-label', block.q);
                     framework.localChange();
                     saving = true;
                     framework._.cpNfInner.chainpad.onSettle(function () {
@@ -4179,6 +4230,7 @@ define([
                 };
                 var onCancelQ = function () {
                     $inputQ.val(block.q || Messages.form_default);
+                    $inputQ.attr('aria-label', block.q || Messages.form_default);
                     cancel = true;
                     $inputQ.blur();
                     $(q).removeClass('editing');
@@ -4191,6 +4243,8 @@ define([
                     $(q).addClass('editing');
                 });
                 $inputQ.blur(onSaveQ);
+                $inputQ.attr('aria-label', block.q || Messages.form_default);
+
                 q = h('div.cp-form-input-block', [inputQ]);
 
                 // Delete question
@@ -4386,11 +4440,16 @@ define([
 
             var editableCls = editable ? ".editable" : "";
             var draggable = APP.drag ? '' : '.nodrag';
-            elements.push(h('fieldset.cp-form-block'+editableCls+draggable, {
+            var ariaLabelledby = 'cp-question-' + (n-1);
+            if (requiredTag) {
+                ariaLabelledby += ' cp-required-' + (n-1);
+            }
+            var attributes = {
                 'data-id':uid,
                 'data-type':type,
-                'aria-labelledby': 'cp-question-' + (n-1)
-            }, [
+                'aria-labelledby': ariaLabelledby
+            };
+            elements.push(h('fieldset.cp-form-block'+editableCls+draggable, attributes, [
                 h('header', [
                     APP.isEditor ? dragHandle : undefined,
                     shiftButtons,
@@ -5110,13 +5169,18 @@ define([
                         return;
                     }
                     // Otherwise add it
-                    var datePicker = h('input');
+                    var datePicker = h('input', {'aria-label': Messages.form_date_time});
                     var picker = Flatpickr(datePicker, {
                         disableMobile: true,
                         enableTime: true,
                         time_24hr: is24h,
                         dateFormat: dateFormat,
-                        minDate: new Date()
+                        minDate: new Date(),
+                        onChange: function(date) {
+                            if (date) {
+                                $(datePicker).attr('aria-label', date);
+                            }
+                        }
                     });
                     var save = h('button.btn.btn-primary', Messages.settings_save);
                     $(save).click(function () {
@@ -5130,7 +5194,7 @@ define([
                             refreshEndDate();
                         });
                     });
-                    var cancel = h('button.btn.btn-danger',Icons.get('close', {'class': 'nomargin'}));
+                    var cancel = h('button.btn.btn-danger',{'aria-label': Messages.poll_remove}, Icons.get('close', {'class': 'nomargin'}));
                     $(cancel).click(function () {
                         refreshEndDate();
                     });
@@ -5301,8 +5365,8 @@ define([
 
             var toggleOffclass = 'ontouchstart' in window ? 'cp-toggle-active' : undefined;
             var toggleOnclass = 'ontouchstart' in window ? undefined : 'cp-toggle-active';
-            var toggleDragOff = h(`button#cp-toggle-drag-off.cp-form-view-drag.${toggleOffclass}`, {'title': Messages.toggleArrows, 'tabindex': 0}, Icons.get('select'));
-            var toggleDragOn = h(`button#cp-toggle-drag-on.cp-form-view-drag.${toggleOnclass}`, {'title': Messages.toggleDrag, 'tabindex': 0}, Icons.get('touch-mode'));
+            var toggleDragOff = h(`button#cp-toggle-drag-off.cp-form-view-drag.${toggleOffclass}`, {'title': Messages.toggleArrows, 'tabindex': 0, 'aria-label': Messages.toggleArrows}, Icons.get('select'));
+            var toggleDragOn = h(`button#cp-toggle-drag-on.cp-form-view-drag.${toggleOnclass}`, {'title': Messages.toggleDrag, 'tabindex': 0, 'aria-label': Messages.toggleDrag}, Icons.get('touch-mode'));
             const updateDrag = state => {
                 return function () {
                     var $container = $('.cp-form-creator-content');

@@ -728,13 +728,21 @@ define([
             var href = el.getAttribute('href');
             if (/^#/.test(href)) {
                 try {
+                    var foundAnchor = false;
                     $inner.find('.cke_anchor[data-cke-realelement]').each(function (j, el) {
+                        if (foundAnchor) { return; }
                         var i = editor.restoreRealElement($(el));
                         var node = i.$;
                         if (node.id === href.slice(1)) {
                             el.scrollIntoView();
+                            foundAnchor = true;
                         }
                     });
+                    // Fallback: try to find anchor by ID directly
+                    if (!foundAnchor) {
+                        var anchorsById = $inner.find('#' + href.slice(1));
+                        if (anchorsById.length) { anchorsById[0].scrollIntoView(); }
+                    }
                 } catch (err) {}
                 return;
             }
@@ -1083,6 +1091,7 @@ define([
 
         framework.onReady(function(newPad) {
             editor.focus();
+            editor.resetUndo();
 
             if (!module.isMaximized) {
                 module.isMaximized = true;

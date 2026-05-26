@@ -647,8 +647,12 @@ define([
                     const integrationHasUnsavedChanges = function(unsavedChanges, cb) {
                         integrationChannel.query('Q_INTEGRATION_HAS_UNSAVED_CHANGES', unsavedChanges, cb);
                     };
+                    const onUserlistChange = (list) => {
+                        integrationChannel.event('Q_INTEGRATION_USERLIST_CHANGE', list);
+                    };
                     var inte = common.createIntegration(integrationSave,
-                                            integrationHasUnsavedChanges);
+                                            integrationHasUnsavedChanges,
+                                            onUserlistChange);
                     if (inte) {
                         integration = true;
                         evIntegrationSave.reg(function () {
@@ -660,6 +664,11 @@ define([
                             integrationSave(function (obj) {
                                 if (obj && obj.error) { console.error(obj.error); }
                                 cb();
+                            });
+                        });
+                        integrationChannel.on('EV_INTEGRATION_MANUAL_SAVE', function () {
+                            integrationSave(function () {
+                                console.log('Integration manual save');
                             });
                         });
                     }
@@ -785,7 +794,6 @@ define([
                 priv.initialState;
             if (readOnly && !isReadOnlyIntegration) { return; }
             fileImporter = function (c, f) {
-                console.error(state, STATE.READY, unsyncMode);
                 if (state !== STATE.READY || unsyncMode) {
                     return void UI.warn(Messages.disconnected);
                 }

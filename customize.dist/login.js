@@ -49,12 +49,17 @@ define([
     };
     if (window.location.hash) { setRedirectTo(); }
 
+    Exports.ssoRedirectTo = (localData) => {
+        redirectTo = localData?.redirectTo || redirectTo;
+    };
     Exports.ssoAuth = function (provider, cb) {
         var keys = Nacl.sign.keyPair();
         var inviteToken = window.location.hash.slice(1);
+
         localStorage.CP_sso_auth = JSON.stringify({
             s: Util.encodeBase64(keys.secretKey),
             p: Util.encodeBase64(keys.publicKey),
+            redirectTo,
             token: inviteToken
         });
         ServerCommand(keys, {
@@ -151,10 +156,20 @@ define([
                                 break;
 */
                             case 'DELETED_USER':
-                                UI.errorLoadingScreen(
-                                    UI.getDestroyedPlaceholder(result.reason, true), true, () => {
-                                        window.location.reload();
+                                if (result.reason === 'PASSWORD_CHANGE') {
+                                    UI.removeLoadingScreen(function () {
+                                        UI.alert(Messages.dph_account_pw, function () {
+                                                hashing = false;
+                                                $('#password').focus();
+                                            }
+                                        );
                                     });
+                                } else {
+                                    UI.errorLoadingScreen(
+                                        UI.getDestroyedPlaceholder(result.reason, true), true, () => {
+                                            window.location.reload();
+                                        });
+                                }
                                 break;
                             case 'INVAL_PASS':
                                 UI.removeLoadingScreen(function () {

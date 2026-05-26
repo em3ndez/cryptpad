@@ -393,7 +393,7 @@ define([
                     });
                 };
                 _field.tokenfield.on('tokenfield:createdtoken', commitTags);
-                _field.tokenfield.on('tokenfield:editedoken', commitTags);
+                _field.tokenfield.on('tokenfield:editedtoken', commitTags);
                 _field.tokenfield.on('tokenfield:removedtoken', commitTags);
             }
         };
@@ -432,6 +432,10 @@ define([
                     var list = boards.list || [];
                     var idx = list.indexOf(id);
                     if (idx !== -1) { list.splice(idx, 1); }
+                    var boardItems = (boards.data || {})[id].item;
+                    boardItems.forEach(function(item) {
+                        delete kanban.options.boards.items[item];
+                    });
                     delete (boards.data || {})[id];
                     kanban.removeBoard(id);
                     return void commit();
@@ -1051,6 +1055,19 @@ define([
             cursors: remoteCursors,
             boards: boards,
             _boards: Util.clone(boards),
+        });
+        // disable dragging when editing
+        $(document).on('mousedown', '.kanban-item input, .kanban-title-board input', function (e) {
+            kanban.options.dragItems = false;
+            e.stopPropagation();
+        });
+        $(document).on('mouseup', function (e) {
+            var selectionActive = window.getSelection && window.getSelection().toString().length > 0;
+            if (!selectionActive) {
+                var drag = kanban.drag;
+                kanban.options.dragItems = drag;
+            }
+            e.stopPropagation();
         });
 
         framework._.cpNfInner.metadataMgr.onChange(function () {

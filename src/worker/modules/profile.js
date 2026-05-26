@@ -119,6 +119,14 @@ const factory = (Util, Hash, Constants, Realtime,
                         Messaging.updateMyData(ctx.store);
                         ctx.updateMetadata();
                     });
+                } else if (key === 'avatar') {
+                    ctx.Store.set(null, {
+                        key: ['profile', 'avatar'],
+                        value: value || ""
+                    }, () => {
+                        Messaging.updateMyData(ctx.store);
+                        ctx.updateMetadata();
+                    });
                 }
                 cb(ctx.listmap.proxy);
             });
@@ -162,7 +170,6 @@ const factory = (Util, Hash, Constants, Realtime,
             ctx.emit('UPDATE', ctx.listmap.proxy, ctx.clients);
         };
         profile.execCommand = function (clientId, obj, cb) {
-            console.log(obj);
             var cmd = obj.cmd;
             var data = obj.data;
             if (cmd === 'SUBSCRIBE') {

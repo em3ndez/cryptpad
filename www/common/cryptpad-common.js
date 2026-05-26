@@ -289,6 +289,10 @@ define([
             });
         });
     };
+    common.getFormResponses = (data, cb) => {
+        postMessage("FORM_GET_RESPONSES", data, cb);
+    };
+
     common.muteChannel = function (channel, state, cb) {
         var mutedChannels = [];
         nThen(function (waitFor) {
@@ -915,6 +919,7 @@ define([
                     href: href,
                     title: data.title,
                     owners: optsPut.owners,
+                    attributes: common?.otherPadAttrs || {},
                     path: ['template']
                 }, function (obj) {
                     if (obj && obj.error) { return void cb(obj.error); }
@@ -1170,7 +1175,7 @@ define([
 
         // Make sure we also store additionnal data to pin all the channels
         // (OO and forms)
-        data.attributes = {};
+        data.attributes ||= {};
         Object.keys(common?.otherPadAttrs || {}).forEach(k => {
             data.attributes[k] = common.otherPadAttrs[k];
         });
@@ -1197,7 +1202,7 @@ define([
             return;
         }
 
-        let attributes = {};
+        let attributes = data.attributes || {};
         nThen(function (waitFor) {
             if (parsed.hashData.type !== 'pad') { return; }
             // Set the correct owner and expiration time if we can find them
@@ -2005,6 +2010,7 @@ define([
         var oldBlockKeys = oldAllocated.blockKeys;
         var blockKeys = newAllocated.blockKeys;
         var auth = data.auth;
+        var hasPassword = Boolean(data.newPassword);
 
         nThen(function (waitFor) {
             // Check if our drive is already owned
@@ -2130,6 +2136,7 @@ define([
             // Update "sso_block" data for SSO accounts
             Block.updateSSOBlock({
                 blockKeys: blockKeys,
+                hasPassword: hasPassword,
                 oldBlockKeys: oldBlockKeys
             }, waitFor(function (err) {
                 if (err) {

@@ -10,13 +10,20 @@ define([
     '/common/common-ui-elements.js',
     '/common/common-util.js',
     '/common/common-constants.js',
+    '/components/marked/marked.min.js',
     '/customize/messages.js',
     '/customize/pages.js',
     '/common/common-icons.js',
     'tui-date-picker'
-], function($, h, Hash, UI, UIElements, Util, Constants, Messages, Pages, Icons, DatePicker) {
+], function($, h, Hash, UI, UIElements, Util, Constants, Marked, Messages, Pages, Icons, DatePicker) {
 
     var handlers = {};
+
+    var renderer = new Marked.Renderer();
+    Marked.setOptions({
+        renderer: renderer,
+        sanitize: true
+    });
 
     var defaultDismiss = function(common, data) {
         return function(e) {
@@ -134,6 +141,25 @@ define([
                 pw: msg.content.password || ''
             };
             common.openURL(Hash.getNewPadURL(msg.content.href, obj));
+            defaultDismiss(common, data)();
+        };
+        if (!content.archived) {
+            content.dismissHandler = defaultDismiss(common, data);
+        }
+    };
+
+    // Send chat message
+    handlers['SEND_CHAT_MESSAGE'] = function(common, data) {
+        var content = data.content;
+        var msg = content.msg;
+        var key = 'sent_chatMessage';
+
+        var name = Util.fixHTML(msg.content.name) || Messages.anonymous;
+        content.getFormatText = function() {
+            return Messages._getKey(key, [name]);
+        };
+        content.handler = function() {
+            common.openURL('/contacts/');
             defaultDismiss(common, data)();
         };
         if (!content.archived) {
@@ -499,7 +525,8 @@ define([
         };
         content.handler = function () {
             let id =  Util.hexToBase64(msg.channel).slice(0,10);
-            let url = msg.isAdmin ? '/support/#tickets' : `/moderation/#open-${id}`;
+            let type = msg.isClose ? 'closed' : 'open';
+            let url = msg.isAdmin ? '/support/#tickets' : `/moderation/#${type}-${id}`;
             common.openURL(url);
             defaultDismiss(common, data)();
         };
@@ -531,12 +558,33 @@ define([
         var toShow = text[myLang];
         // Otherwise, fallback to the default language if it exists
         if (!toShow && defaultL) { toShow = text[defaultL]; }
+        toShow ||= text['default'];
         // No translation available, dismiss
         if (!toShow) { return defaultDismiss(common, data)(); }
 
         var slice = toShow.length > 200;
         var unsafe = toShow;
-        toShow = Util.fixHTML(toShow);
+
+        if (content.markdown === true) {
+            toShow = Marked.parse(toShow);
+            slice = false;
+            content.handler = function () {
+                var content = h('div', [
+                    h('h4', Messages.broadcast_newCustom),
+                    UI.setHTML(h('div.cp-admin-message'), toShow)
+                ]);
+                $(content).find('a').click(e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const href = e.target.href || '';
+                    if (!/^(http|\/)/.test(href)) { return; }
+                    common.openURL(e.target.href);
+                });
+                UI.alert(content);
+            };
+        } else {
+            toShow = Util.fixHTML(toShow);
+        }
 
         content.getFormatText = function () {
             if (slice) {
@@ -553,7 +601,9 @@ define([
                 UI.alert(content);
             };
         }
-        if (!content.archived) {
+        if (content.dismiss) {
+            content.dismissHandler = content.dismiss;
+        } else if (!content.archived) {
             content.dismissHandler = defaultDismiss(common, data);
         }
     };

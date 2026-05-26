@@ -102,7 +102,7 @@ const factory = (UserObject, Util, Hash,
             // Folder is being deleted by its owner, don't deprecate it
             return;
         }
-        if (Env.user.userObject.readOnly) {
+        if (Env.user.userObject.readOnly || !reason) {
             // In a read-only team, we can't deprecate a shared folder
             // Use a empty object with a deprecated flag...
             var lm = { proxy: { deprecated: true } };
@@ -143,10 +143,10 @@ const factory = (UserObject, Util, Hash,
     var _ownedByMe = function (Env, owners) {
         return Array.isArray(owners) && owners.indexOf(Env.edPublic) !== -1;
     };
-    var _ownedByOther = function (Env, owners) {
-        return Array.isArray(owners) && owners.length &&
-                (!Env.edPublic || owners.indexOf(Env.edPublic) === -1);
-    };
+    // var _ownedByOther = function (Env, owners) {
+    //     return Array.isArray(owners) && owners.length &&
+    //             (!Env.edPublic || owners.indexOf(Env.edPublic) === -1);
+    // };
 
     var _getUserObjects = function (Env) {
         var userObjects = [Env.user.userObject];
@@ -430,7 +430,9 @@ const factory = (UserObject, Util, Hash,
         paths.forEach(function (path, idx) {
             var el = userObject.find(path);
             var files = [];
-            var key = path[path.length - 1];
+            // For trash paths, the name is at index 1, not the last element
+            var isTrashPath = userObject.isPathIn && userObject.isPathIn(path, [userObject.TRASH]);
+            var key = isTrashPath && path.length >= 2 ? path[1] : path[path.length - 1];
 
             // Get the files ID from the current path (file or folder)
             if (userObject.isFile(el)) {
@@ -510,12 +512,17 @@ const factory = (UserObject, Util, Hash,
 
         if (!newResolved.userObject.isFolder(newResolved.path)) { return void cb(); }
 
+        var moveError = null;
         nThen(function (waitFor) {
             if (resolved.main.length) {
                 // Move from the main drive
                 if (!newResolved.id) {
                     // Move from the main drive to the main drive
-                    Env.user.userObject.move(resolved.main, newResolved.path, waitFor());
+                    Env.user.userObject.move(resolved.main, newResolved.path, waitFor(function (err) {
+                        if (err && !moveError) {
+                            moveError = err;
+                        }
+                    }));
                 } else {
                     // Move from the main drive to a shared folder
 
@@ -523,12 +530,18 @@ const factory = (UserObject, Util, Hash,
                     var toCopy = _getCopyFromPaths(Env, resolved.main, Env.user.userObject);
                     var newUserObject = newResolved.userObject;
                     toCopy.forEach(function (obj) {
-                        newUserObject.copyFromOtherDrive(newResolved.path, obj.el, obj.data, obj.key);
+                        try {
+                            newUserObject.copyFromOtherDrive(newResolved.path, obj.el, obj.data, obj.key);
+                        } catch (err) {
+                            if (!moveError) {
+                                moveError = err;
+                            }
+                        }
                     });
 
                     if (copy) { return; }
 
-                    if (resolved.main.length) {
+                    if (resolved.main.length && !moveError) {
                         // Remove the elements from the old location (without unpinning)
                         Env.user.userObject.delete(resolved.main, waitFor()); // FIXME waitFor() is called synchronously
                     }
@@ -542,7 +555,11 @@ const factory = (UserObject, Util, Hash,
                     var paths = resolved.folders[fId];
                     if (newResolved.id === fId) {
                         // Move to the same shared folder
-                        newResolved.userObject.move(paths, newResolved.path, waitFor());
+                        newResolved.userObject.move(paths, newResolved.path, waitFor(function (err) {
+                            if (err && !moveError) {
+                                moveError = err;
+                            }
+                        }));
                     } else {
                         // Move to a different shared folder or to main drive
                         var uoFrom = Env.folders[fId].userObject;
@@ -551,17 +568,28 @@ const factory = (UserObject, Util, Hash,
                         // Copy the elements to the new location
                         var toCopy = _getCopyFromPaths(Env, paths, uoFrom);
                         toCopy.forEach(function (obj) {
-                            uoTo.copyFromOtherDrive(newResolved.path, obj.el, obj.data, obj.key);
+                            try {
+                                uoTo.copyFromOtherDrive(newResolved.path, obj.el, obj.data, obj.key);
+                            } catch (err) {
+                                if (!moveError) {
+                                    moveError = err;
+                                }
+                            }
                         });
 
                         if (copy) { return; }
 
                         // Remove the elements from the old location (without unpinning)
-                        uoFrom.delete(paths, waitFor()); // FIXME waitFor() is called synchronously
+                        if (!moveError) {
+                            uoFrom.delete(paths, waitFor()); // FIXME waitFor() is called synchronously
+                        }
                     }
                 });
             }
         }).nThen(function () {
+            if (moveError) {
+                return void cb(moveError);
+            }
             cb();
         });
     };
@@ -1279,37 +1307,30 @@ const factory = (UserObject, Util, Hash,
     */
 
     var excludeInvalidIdentifiers = function (result) {
-        return result.filter(function (channel) {
+        const filter = (channel) => {
             if (typeof(channel) !== 'string') { return; }
             return [32, 48].indexOf(channel.length) !== -1;
-        });
+        };
+
+        let newSet = new Set();
+        for (var channel of result) {
+            if(filter(channel)) { newSet.add(channel); }
+        }
+        return newSet;
     };
 
     // Get the list of channels filtered by a type (expirable channels, owned channels, pin list)
     var getChannelsList = function (Env, type) {
-        var result = [];
+        //var result = [];
+        let result = new Set();
         var addChannel = function (userObject) {
-            if (type === 'expirable') {
-                return function (fileId) {
-                    var data = userObject.getFileData(fileId);
-                    if (!data) { return; }
-                    // Don't push duplicates
-                    if (result.indexOf(data.channel) !== -1) { return; }
-                    // Return pads owned by someone else or expired by time
-                    if (_ownedByOther(Env, data.owners) || (data.expire && data.expire < (+new Date()))) {
-                        result.push(data.channel);
-                    }
-                };
-            }
             if (type === 'owned') {
                 return function (fileId) {
                     var data = userObject.getFileData(fileId);
                     if (!data) { return; }
-                    // Don't push duplicates
-                    if (result.indexOf(data.channel) !== -1) { return; }
                     // Return owned pads
                     if (_ownedByMe(Env, data.owners)) {
-                        result.push(data.channel);
+                        result.add(data.channel);
                     }
                 };
             }
@@ -1317,37 +1338,31 @@ const factory = (UserObject, Util, Hash,
                 return function (fileId) {
                     var data = userObject.getFileData(fileId);
                     if (!data) { return; }
-                    // Don't pin pads owned by someone else
-                    //if (_ownedByOther(Env, data.owners)) { return; }
                     // Pin onlyoffice checkpoints
                     if (data.lastVersion) {
                         var otherChan = Hash.hrefToHexChannelId(data.lastVersion);
-                        if (result.indexOf(otherChan) === -1) {
-                            result.push(otherChan);
-                        }
+                        result.add(otherChan);
                     }
                     // Pin form answers channels
-                    if (data.answersChannel && result.indexOf(data.answersChannel) === -1) {
-                        result.push(data.answersChannel);
+                    if (data.answersChannel) {
+                        result.add(data.answersChannel);
                     }
                     // Pin onlyoffice realtime patches
-                    if (data.rtChannel && result.indexOf(data.rtChannel) === -1) {
-                        result.push(data.rtChannel);
+                    if (data.rtChannel) {
+                        result.add(data.rtChannel);
                     }
                     // Pin onlyoffice images
                     if (data.ooImages && Array.isArray(data.ooImages)) {
-                        Array.prototype.push.apply(result, data.ooImages);
+                        data.ooImages.forEach(id => result.add(id));
                     }
                     // Pin the pad
-                    if (result.indexOf(data.channel) === -1) {
-                        result.push(data.channel);
-                    }
+                    result.add(data.channel);
                 };
             }
         };
 
-        if (type === 'owned' && !Env.edPublic) { return excludeInvalidIdentifiers(result); }
-        if (type === 'pin' && !Env.edPublic) { return excludeInvalidIdentifiers(result); }
+        if (type === 'owned' && !Env.edPublic) { return result; }
+        if (type === 'pin' && !Env.edPublic) { return result; }
 
         // Get the list of user objects
         var userObjects = _getUserObjects(Env);
@@ -1365,7 +1380,7 @@ const factory = (UserObject, Util, Hash,
             }).map(function (fId) {
                 return Env.user.proxy[UserObject.SHARED_FOLDERS][fId].channel;
             });
-            Array.prototype.push.apply(result, sfOwned);
+            sfOwned.forEach(id => result.add(id));
         }
         if (type === "pin") {
             var sfChannels = Object.keys(Env.folders).map(function (fId) {
@@ -1375,7 +1390,7 @@ const factory = (UserObject, Util, Hash,
                     console.error(err);
                 }
             }).filter(Boolean);
-            Array.prototype.push.apply(result, sfChannels);
+            sfChannels.forEach(id => result.add(id));
         }
 
         return excludeInvalidIdentifiers(result);
@@ -1401,10 +1416,38 @@ const factory = (UserObject, Util, Hash,
             });
         };
         if (!Env.pinPads) { return void todo(); }
-        Env.pinPads([pad.channel], function (obj) {
+
+        const channels = [pad.channel];
+        if (pad.rtChannel) { channels.push(pad.rtChannel); }
+        if (pad.answersChannel) { channels.push(pad.answersChannel); }
+
+        Env.pinPads(channels, function (obj) {
             if (obj && obj.error) { return void cb(obj.error); }
             todo();
         });
+    };
+
+    const getMissingRtChannel = (Env) => {
+        const userObjects = _getUserObjects(Env);
+        const all = [];
+        userObjects.forEach(function (uo) {
+            const missing = uo.getMissingRtChannel();
+            if (!missing) { return; }
+            if (uo.readOnly) { missing._readOnly = true; }
+            all.push(missing);
+        });
+        return all;
+    };
+    const findMissingRtChannel = (Env) => {
+        const userObjects = _getUserObjects(Env);
+        const all = [];
+        userObjects.forEach(function (uo) {
+            if (uo.readOnly) { return; }
+            const missing = uo.findMissingRtChannel();
+            if (!missing) { return; }
+            all.push(missing);
+        });
+        return all;
     };
 
     var create = function (proxy, data, uoConfig) {
@@ -1446,6 +1489,19 @@ const factory = (UserObject, Util, Hash,
             delete Env.unpinPads;
         };
 
+        let rtChannelTo;
+        const setRtChannelTo = () => {
+            clearTimeout(rtChannelTo);
+            rtChannelTo = setTimeout(() => {
+                if (Env.store.offline) { return void setRtChannelTo(); }
+                const list = findMissingRtChannel(Env);
+                Env.Store.fixMissingRtChannelInterval(list, () => {
+                    setRtChannelTo();
+                });
+            }, 120000);
+        };
+        setRtChannelTo();
+
         return {
             // Manager
             addProxy: callWithEnv(addProxy),
@@ -1462,6 +1518,7 @@ const factory = (UserObject, Util, Hash,
             getTagsList: callWithEnv(getTagsList),
             getSecureFilesList: callWithEnv(getSecureFilesList),
             getSharedFolderData: callWithEnv(getSharedFolderData),
+            isInSharedFolder: callWithEnv(_isInSharedFolder),
             // Store
             getChannelsList: callWithEnv(getChannelsList),
             addPad: callWithEnv(addPad),
@@ -1473,7 +1530,9 @@ const factory = (UserObject, Util, Hash,
             findFile: callWithEnv(findFile),
             getEditHash: callWithEnv(getEditHash),
             user: Env.user,
-            folders: Env.folders
+            folders: Env.folders,
+            // Fix rtChannel
+            getMissingRtChannel: callWithEnv(getMissingRtChannel)
         };
     };
 
@@ -1490,7 +1549,12 @@ const factory = (UserObject, Util, Hash,
                 path: path,
                 newName: newName
             }
-        }, cb);
+        }, function (err, responseData) {
+            if (err || responseData?.error) {
+                return void cb(err || responseData);
+            }
+            cb();
+        });
     };
     var moveInner = function (Env, paths, newPath, cb, copy) {
         return void Env.sframeChan.query("Q_DRIVE_USEROBJECT", {
@@ -1500,7 +1564,12 @@ const factory = (UserObject, Util, Hash,
                 newPath: newPath,
                 copy: copy
             }
-        }, cb);
+        }, function (err, responseData) {
+            if (err || responseData?.error) {
+                return void cb(err || responseData);
+            }
+            cb();
+        });
     };
     var emptyTrashInner = function (Env, deleteOwned, cb) {
         return void Env.sframeChan.query("Q_DRIVE_USEROBJECT", {

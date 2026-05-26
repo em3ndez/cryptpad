@@ -50,6 +50,7 @@ define([
             'cp-support-list',
         ],
         'new': [ // Msg.support_cat_new
+            'cp-support-custom',
             'cp-support-subscribe',
             'cp-support-language',
             'cp-support-form',
@@ -220,6 +221,18 @@ define([
         return $(content);
     };
 
+    create['custom'] = function () {
+        const msg = AppConfig.customSupportMsg;
+        if (!msg) { return $(); }
+        const lang = Messages._getLanguage();
+        const text = msg[lang] || msg['default'];
+        if (!text) { return $(); }
+        const div = h('div.cp-support-subscribe.cp-sidebarlayout-element', [
+            h('div.alert.alert-warning', text)
+        ]);
+        return $(div);
+    };
+
     // Create a new tickets
     create['form'] = function () {
         var key = 'form';
@@ -283,7 +296,7 @@ define([
     };
 
     var createLeftside = function () {
-        var $categories = $('<div>', {'class': 'cp-sidebarlayout-categories'})
+        var $categories = $('<div>', {'class': 'cp-sidebarlayout-categories', 'role': 'menu'})
                             .appendTo(APP.$leftside);
         var metadataMgr = common.getMetadataMgr();
         var privateData = metadataMgr.getPrivateData();
@@ -291,9 +304,13 @@ define([
         if (!categories[active]) { active = 'tickets'; }
         common.setHash(active);
         Object.keys(categories).forEach(function (key) {
+            var name = Messages['support_cat_'+key] || key;
             var $category = $('<div>', {
                 'class': 'cp-sidebarlayout-category',
-                'data-category': key
+                'data-category': key,
+                'tabindex': 0,
+                'role': 'menuitem',
+                'aria-label': name
             }).appendTo($categories);
             var iconClass = icons[key];
             if (iconClass) {
@@ -303,8 +320,7 @@ define([
             if (key === active) {
                 $category.addClass('cp-leftside-active');
             }
-
-            $category.click(function () {
+            Util.onClickEnter($category, function () {
                 if (!Array.isArray(categories[key]) && categories[key].onClick) {
                     categories[key].onClick();
                     return;
@@ -316,7 +332,7 @@ define([
                 showCategories(categories[key]);
             });
 
-            $category.append(Messages['support_cat_'+key] || key);
+            $category.append(h('span.cp-sidebarlayout-category-name', name));
         });
         showCategories(categories[active]);
     };
@@ -329,6 +345,7 @@ define([
             $container: APP.$toolbar,
             pageTitle: Messages.supportPage,
             metadataMgr: common.getMetadataMgr(),
+            skipLink: '#cp-sidebarlayout-container'
         };
         APP.toolbar = Toolbar.create(configTb);
         APP.toolbar.$rightside.hide();

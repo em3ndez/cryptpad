@@ -5,6 +5,8 @@
 (function () {
     'use strict';
     var factory = function (/*Hash*/) {
+        let devMode = false;
+        try { devMode = localStorage.CryptPad_dev === "1"; } catch (e) {}
 
         // This API is used to load a CryptPad editor for a provided document in
         // an external platform.
@@ -48,7 +50,7 @@
                 var msg = data.msg;
                 var txid = data.txid;
                 if (commands[msg.q]) {
-                    console.warn('OUTER RECEIVED QUERY', msg.q, msg.data);
+                    if (devMode) { console.warn('OUTER RECEIVED QUERY', msg.q, msg.data); }
                     commands[msg.q](msg.data, function (args) {
                         _sendCb(txid, args);
                     });
@@ -62,7 +64,7 @@
                 var txid = getTxid();
                 if (cb) { handlers[txid] = cb; }
 
-                console.warn('OUTER SENT QUERY', q, data);
+                if (devMode) { console.warn('OUTER SENT QUERY', q, data); }
                 iWindow.postMessage({ msg: {
                     q: q,
                     data: data,
@@ -90,6 +92,7 @@
             setTimeout(function () {
                 var docID = config.document.key;
                 var key = config.document.key;
+                const isView = config.mode === 'view';
                 var blob;
 
                 var getBlob = function (cb) {
@@ -126,6 +129,7 @@
 
                 var start = function () {
                     //config.document.key = key;
+                    const autosave = typeof(config.autosave) === "number" ? config.autosave : 10;
                     chan.send('START', {
                         key: key,
                         application: config.documentType,
@@ -134,8 +138,8 @@
                         documentKey: docID,
                         document: blob,
                         ext: config.document.fileType,
-                        autosave: config.events.onSave && (config.autosave || 10),
-                        readOnly: config.mode === 'view',
+                        autosave: config.events.onSave && autosave,
+                        readOnly: isView,
                         editorConfig: config.editorConfig || {},
                         _config: serializedConfig()
                     }, function (obj) {
@@ -171,14 +175,19 @@
                 var getSession = function (cb) {
                     chan.send('GET_SESSION', {
                         key: key,
+                        view: isView,
                         keepOld: !config.events.onNewKey
                     }, function (obj) {
+                        if (isView && obj.error === 'ENOENT') {
+                            key = obj.key;
+                            return void cb();
+                        }
+
                         if (obj && obj.error) { reject(obj.error); return console.error(obj.error); }
 
                         // OnlyOffice
                         if (!config.events.onNewKey) {
                             key = obj.key;
-                            console.error(key, obj);
                             return void cb();
                         }
 
@@ -188,7 +197,8 @@
                             // time and in this case, only the first user will be able to generate a key.
                             return config.events.onNewKey({
                                 old: key,
-                                new: obj.key
+                                new: obj.key,
+                                view: obj.viewKey,
                             }, function (_key) {
                                 // Delay reloading tabs with deprecated key
                                 var to = _key !== obj.key ? 1000 : 0;
@@ -216,6 +226,12 @@
                     });
                 });
 
+                chan.on('DOCUMENT_ERROR', function (err) {
+                    if (config.events.onError) {
+                        config.events.onError(err);
+                    }
+                });
+
                 chan.on('ON_DOWNLOADAS', blob => {
                     let url = URL.createObjectURL(blob);
                     if (!config.events.onDownloadAs) { return; }
@@ -232,6 +248,11 @@
                     if (!config.events.onSave) { return void cb(); }
                     config.events.onSave(data, cb);
                 });
+                chan.on('GET_BLOB', (data, cb) => {
+                    getBlob((err, blob) => {
+                        cb({error: err, blob});
+                    });
+                });
                 chan.on('RELOAD', function () {
                     config.document.blob = blob;
                     if (!config.editorConfig) { // Not OnlyOffice shim
@@ -244,6 +265,11 @@
                         config.events.onHasUnsavedChanges(unsavedChanges);
                     }
                     cb();
+                });
+                chan.on('USERLIST_CHANGE', (list) => {
+                    if (config.events.onUserlistChange) {
+                        config.events.onUserlistChange(list);
+                    }
                 });
                 chan.on('ON_INSERT_IMAGE', function(data, cb) {
                     if (config.events.onInsertImage) {
@@ -377,6 +403,15 @@
                 }
 
                 chan.send('DOWNLOAD_AS', arg);
+            };
+            ret.save = () => {
+                if (!chan) {
+                    return void onDocumentReady.push(() => {
+                        ret.save();
+                    });
+                }
+
+                chan.send('MANUAL_SAVE');
             };
 
             return ret;

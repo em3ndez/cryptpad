@@ -14,7 +14,10 @@ define([
         return Math.random().toString(16).replace('0.', '');
     };
     var init = function () {
-        console.warn('INIT');
+        let devMode = false;
+        try { devMode = localStorage.CryptPad_dev === "1"; } catch (e) {}
+        if (devMode) { console.warn('INIT'); }
+
         var p = window.parent;
         var txid = getTxid();
         p.postMessage({ q: 'INTEGRATION_READY', txid: txid }, '*');
@@ -86,7 +89,7 @@ define([
             http.open('HEAD', url);
             http.onreadystatechange = function() {
                 if (this.readyState === this.DONE) {
-                    console.error(this.status);
+                    if (devMode) { console.error(oldKey, this.status); }
                     if (this.status === 200) {
                         return cb({state: true});
                     }
@@ -100,31 +103,78 @@ define([
         };
         let sanitizeKey = key => {
             try {
-                Util.decodeBase64(key);
+                Util.decodeBase64(key.replace(/-/g, '/'));
                 return key;
             } catch (e) {
                 return Util.encodeBase64(Util.decodeUTF8(key)).replaceAll('=', '');
             }
         };
+        const getViewKey = key => {
+            const secret = Hash.getSecrets('integration', key);
+            return Hash.getViewHashFromKeys(secret);
+        };
         chan.on('GET_SESSION', function (data, cb) {
-            if (data.keepOld) { // they provide their own key, we must turn it into a hash
-                var key = sanitizeKey(data.key) + "000000000000000000000000000000000";
-                console.warn('KEY', key);
-                return void cb({
-                    key: `/2/integration/edit/${key.slice(0,24)}/`
-                });
-            }
             var getHash = function () {
                 //isNew = true;
                 return Hash.createRandomHash('integration');
             };
+            if (data.view) { // Only existing session
+                let hash = data.keepOld
+                            ? `/2/integration/view/${data.key}/`
+                            : data.key;
+                let key = data.key ? hash : getHash();
+                return checkSession(key, function (obj) {
+                    if (!obj || obj.error) { return cb(obj); }
+                    if (!obj.state) {
+                        console.error('View session unavailable');
+                    }
+                    if (!obj.state && !data.key) {
+                        // Send error to make sure we won't trigger
+                        // events.onNewKey and have the outside
+                        // platform save fake keys
+                        return void cb({
+                            error: 'ENOENT',
+                            key,
+                            viewKey: key
+                        });
+                    }
+                    if (!obj.state) {
+                        // Key provided but invalid: abort
+                        return void cb({
+                            error: 'ENOENT',
+                            key,
+                        });
+                    }
+                    cb({
+                        key: key,
+                        viewKey: getViewKey(key)
+                    });
+                });
+            }
+            if (data.keepOld) { // they provide their own key, we must turn it into a hash
+                var key = sanitizeKey(data.key) + "000000000000000000000000000000000";
+                if (devMode) { console.warn('KEY', key); }
+                let hash = `/2/integration/edit/${key.slice(0,24)}/`;
+                return void cb({
+                    key: hash,
+                    viewKey: getViewKey(hash)
+                });
+            }
             var oldKey = data.key;
-            if (!oldKey) { return void cb({ key: getHash() }); }
+            if (!oldKey) {
+                const key = getHash();
+                return void cb({
+                    key: key,
+                    viewKey: getViewKey(key)
+                });
+            }
 
             checkSession(oldKey, function (obj) {
                 if (!obj || obj.error) { return cb(obj); }
+                const key = obj.state ? oldKey : getHash();
                 cb({
-                    key: obj.state ? oldKey : getHash()
+                    key: key,
+                    viewKey: getViewKey(key)
                 });
             });
         });
@@ -135,8 +185,14 @@ define([
         var onHasUnsavedChanges = function (unsavedChanges, cb) {
             chan.send('HAS_UNSAVED_CHANGES', unsavedChanges, cb);
         };
+        var onUserlistChange = list => {
+            chan.send('USERLIST_CHANGE', list);
+        };
         var onInsertImage = function (data, cb) {
             chan.send('ON_INSERT_IMAGE', data, cb);
+        };
+        var onError = function (err) {
+            chan.send('DOCUMENT_ERROR', err);
         };
         var onReady = function () {
             chan.send('DOCUMENT_READY', {});
@@ -157,9 +213,27 @@ define([
             chan.send('ON_DOWNLOADAS', blob);
         };
 
+        let manualSave;
+        chan.on('MANUAL_SAVE', function () {
+            if (typeof(manualSave) !== "function") {
+                console.error('UNSUPPORTED COMMAND', 'save');
+                return;
+            }
+            manualSave();
+        });
+        let setSave = f => {
+            manualSave = f;
+        };
+
 
         let getInstanceURL = function () {
             return Config.httpUnsafeOrigin;
+        };
+        let getBlobClient = (cb) => {
+            chan.send('GET_BLOB', obj => {
+                if (obj?.error) { console.error(obj?.error); }
+                cb(obj?.blob);
+            });
         };
         let getBlobServer = function (documentURL, cb) {
             let xhr = new XMLHttpRequest();
@@ -174,11 +248,11 @@ define([
                     // myBlob is now the blob that the object URL pointed to.
                     cb(null, blob);
                 } else {
-                    cb(this.status);
+                    getBlobClient(cb);
                 }
             };
-            xhr.onerror = function (e) {
-                cb(e.message);
+            xhr.onerror = function () {
+                getBlobClient(cb);
             };
             xhr.send();
         };
@@ -194,7 +268,7 @@ define([
             xhr.responseType = 'blob';
             //xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.onload = function () {
-                console.error(this.status);
+                if (devMode) { console.error(this.status); }
                 if (this.status === 200) {
                     cb();
                 } else {
@@ -207,7 +281,7 @@ define([
             xhr.send(blob);
         };
         chan.on('START', function (data, cb) {
-            console.warn('INNER START', data);
+            if (devMode) { console.warn('INNER START', data); }
             // data.key is a hash
             var href = Hash.hashToHref(data.key, data.application);
             if (data.editorConfig.lang) {
@@ -232,7 +306,7 @@ define([
                 });
             };
 
-            console.error(Hash.hrefToHexChannelId(href));
+            if (devMode) { console.error(Hash.hrefToHexChannelId(href)); }
             let startApp = function (blob) {
                 window.CP_integration_outer = {
                     pathname: `/${data.application}/`,
@@ -248,12 +322,15 @@ define([
                         _: data._config
                     },
                     utils: {
+                        onError,
                         onReady: onReady,
                         onDownloadAs,
                         setDownloadAs,
+                        setSave,
                         save: save,
                         reload: reload,
                         onHasUnsavedChanges: onHasUnsavedChanges,
+                        onUserlistChange,
                         onInsertImage: onInsertImage
                     }
                 };
@@ -262,7 +339,6 @@ define([
                     path = '/common/onlyoffice/main.js';
                 }
                 require([path], function () {
-                    console.warn('SAO REQUIRED');
                     delete window.CP_integration_outer;
                     cb();
                 });
